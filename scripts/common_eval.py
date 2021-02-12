@@ -11,8 +11,9 @@ METRIC_MAP = 'map'
 # We hardcode 20, b/c it's hardcoded in gdeval.pl
 NDCG_TOP_K = 20
 METRIC_NDCG20 = 'ndcg@20'
+METRIC_MRR = "recip_rank"
 
-METRIC_LIST = [METRIC_MAP, METRIC_NDCG20]
+METRIC_LIST = [METRIC_MAP, METRIC_NDCG20, METRIC_MRR]
 
 QrelEntry = collections.namedtuple('QrelEntry',
                                    'queryId docId relGrade')
@@ -69,6 +70,14 @@ class MeanAveragePrecision:
                 result += pos / (i + 1.)
 
         return result / postQty
+
+
+class MeanReciprocalRank:
+    def __call__(self, relsSortedByScores, qrelDict):
+        for i, rel in enumerate(relsSortedByScores):
+            if rel > RELEVANCE_THRESHOLD:
+                return 1 / (i + 1.)
+        return 0
 
 
 def genQrelStr(queryId, docId, relGrade):
@@ -221,28 +230,15 @@ def readRunDict(fileName):
     return result
 
 
-def evalRun(rerankRun, runFileName, qrelFileName, metricFunc,
-            saveRun=False, debug=False, useQrelCache=False):
+def evalRun(rerankRun, qrelsDict, metricFunc, debug=False):
     """Evaluate run stored in a file using QRELs stored in a file.
 
     :param rerankRun:     a run dictionary (of dictionaries)
-    :param runFileName:   a run file name (for external tools)
-    :param qrelFileName:  a QREL file name
+    :param qrelsDict:     a QRELs dictionary read by the function readQrelsDict
     :param metricFunc:    a metric function or class instance with overloaded __call__
-    :param saveRun:       true if we want to save the run
+
     :return:  the average metric value
     """
-
-    if saveRun:
-        writeRunDict(rerankRun, runFileName)
-
-    global qrelCache
-
-    if useQrelCache and qrelFileName in qrelCache:
-        qrels = qrelCache[qrelFileName]
-    else:
-        qrels = qrelCache[qrelFileName] = readQrelsDict(qrelFileName)
-
     resArr = []
 
     for qid, scoreDict in rerankRun.items():
@@ -250,8 +246,8 @@ def evalRun(rerankRun, runFileName, qrelFileName, metricFunc,
 
         val = 0
 
-        if qid in qrels:
-            queryQrelDict = qrels[qid]
+        if qid in qrelsDict:
+            queryQrelDict = qrelsDict[qid]
 
             for did, score in getSorteScoresFromScoreDict(scoreDict):
                 rel_score = 0
@@ -274,15 +270,21 @@ def evalRun(rerankRun, runFileName, qrelFileName, metricFunc,
     return res
 
 
-def getEvalResults(useExternalEval, evalMetric,
-                   rerankRun, runFile, qrelFile,
+def getEvalResults(useExternalEval,
+                   evalMetric,
+                   rerankRun,
+                   qrelFile,
+                   runFile=None,
                    useQrelCache=False):
     """Carry out internal or external evaluation.
 
     :param useExternalEval:   True to use external evaluation tools.
     :param evalMetric:        Evaluation metric (from the METRIC_LIST above)
-    :param runFile:           A run file to store results for external eval tool.
+    :param runFile:           A run file to store results (or None).
     :param qrelFile:          A QREL file.
+    :param useQrelCache:  use global QREL file cache (dangerous option: there should
+                          be no file-name collisions to for this)
+
     :return:  average metric value.
     """
 
@@ -292,8 +294,13 @@ def getEvalResults(useExternalEval, evalMetric,
             m = 'map'
         elif evalMetric == METRIC_NDCG20:
             m = 'ndcg_cut_20'
+        elif evalMetric == METRIC_MRR:
+            m = 'recip_rank'
         else:
             raise Exception('Unsupported metric: ' + evalMetric)
+
+        assert runFile is not None, "Run file name should not be None"
+        writeRunDict(rerankRun, runFile)
 
         return trec_eval(runFile, qrelFile, m)
     else:
@@ -302,13 +309,34 @@ def getEvalResults(useExternalEval, evalMetric,
             f = MeanAveragePrecision()
         elif evalMetric == METRIC_NDCG20:
             f = NormalizedDiscountedCumulativeGain(NDCG_TOP_K)
+        elif evalMetric == METRIC_MRR:
+            f = MeanReciprocalRank()
         else:
             raise Exception('Unsupported metric: ' + evalMetric)
 
-        return evalRun(rerankRun, runFile, qrelFile, f, useQrelCache=useQrelCache)
+        if runFile is not None:
+            writeRunDict(rerankRun, runFile)
+
+        global qrelCache
+
+        if useQrelCache and qrelFile in qrelCache:
+            qrels = qrelCache[qrelFile]
+        else:
+            qrels = qrelCache[qrelFile] = readQrelsDict(qrelFile)
+
+        return evalRun(rerankRun=rerankRun,
+                       qrelsDict=qrels,
+                       metricFunc=f)
 
 
 def trec_eval(runf, qrelf, metric):
+    """Run an external tool: trec_eval and retrieve results.
+
+    :param runf:    a run file name
+    :param qrelf:   a QREL file name
+    :param metric:  a metric code (should match what trec_eval prints)
+    :return:
+    """
     trec_eval_f = 'trec_eval/trec_eval'
     trec_eval_params = [trec_eval_f,
                         '-m', 'official',

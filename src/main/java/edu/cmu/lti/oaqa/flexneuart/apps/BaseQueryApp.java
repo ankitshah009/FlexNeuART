@@ -33,6 +33,7 @@ import com.google.common.base.Splitter;
 
 import edu.cmu.lti.oaqa.flexneuart.cand_providers.*;
 import edu.cmu.lti.oaqa.flexneuart.letor.CompositeFeatureExtractor;
+import edu.cmu.lti.oaqa.flexneuart.letor.DataPointWrapper;
 import edu.cmu.lti.oaqa.flexneuart.letor.FeatExtrResourceManager;
 import edu.cmu.lti.oaqa.flexneuart.letor.FeatureExtractor;
 import edu.cmu.lti.oaqa.flexneuart.utils.Const;
@@ -40,52 +41,6 @@ import edu.cmu.lti.oaqa.flexneuart.utils.DataEntryReader;
 import edu.cmu.lti.oaqa.flexneuart.utils.QrelReader;
 import ciir.umass.edu.learning.*;
 
-/**
- * This class converts a dense vector to DataPoint format of the RankLib library
- * version 2.5.
- * 
- * <p>Perhaps, an <b>important</b> note: a RankLib DataPoint class contains 
- * a static variable featureCount. It doesn't seem to be used except
- * for feature normalization or by the evaluator code. So, it seems
- * to be fine to leave this variable set to default value (zero).
-
- * </p>
- * 
- * @author Leonid Boytsov
- *
- */
-class DataPointWrapper extends DataPoint {
-  DataPointWrapper() {}
-  
-  void assign(DenseVector feat) {
-    mFeatValues = new float[feat.size() + 1];
-    double data[] = feat.getData();
-    for (int i = 0; i < feat.size(); ++i)
-      mFeatValues[i+1] = (float)data[i];
-  }
-  
-  @Override
-  public float getFeatureValue(int fid) {
-    return mFeatValues[fid];
-  }
-
-  @Override
-  public float[] getFeatureVector() {
-    return mFeatValues;
-  }
-
-  @Override
-  public void setFeatureValue(int fid, float val) {
-    mFeatValues[fid] = val;
-  }
-
-  @Override
-  public void setFeatureVector(float[] vals) {
-    mFeatValues = vals;
-  }
-  
-  float [] mFeatValues;
-}
 
 class BaseProcessingUnit {
   public static Object              mWriteLock = new Object();
@@ -111,11 +66,12 @@ class BaseProcessingUnit {
 
       String text = queryFields.get(Const.TEXT_FIELD_NAME);
       if (text != null) {
-        // This is a workaround for a pesky problem: didn't previously notice that the string
+        // This was a workaround for a pesky problem: didn't previously notice that the string
         // n't (obtained by tokenization of can't is indexed. Querying using this word
         // add a non-negligible overhead (although this doesn't affect overall accuracy)
-        // THIS IS FOR THE FIELD TEXT ONLY
-        queryFields.put(Const.TEXT_FIELD_NAME, CandidateProvider.removeAddStopwords(text));
+        // However, we believe data processing scripts should now always remove these extra stop-words
+        //queryFields.put(Const.TEXT_FIELD_NAME, CandidateProvider.removeAddStopwords(text));
+        queryFields.put(Const.TEXT_FIELD_NAME, text);
       }
       qres = candProvider.getCandidates(queryNum, queryFields, mAppRef.mMaxCandRet);
       if (mAppRef.mResultCache != null) 
@@ -511,7 +467,6 @@ public abstract class BaseQueryApp {
   void addResourceOpts() {    
     mOptions.addOption(CommonParams.FWDINDEX_PARAM,            null, true,  CommonParams.FWDINDEX_DESC);    
     mOptions.addOption(CommonParams.GIZA_ROOT_DIR_PARAM,       null, true,  CommonParams.GIZA_ROOT_DIR_DESC);
-    mOptions.addOption(CommonParams.GIZA_ITER_QTY_PARAM,       null, true,  CommonParams.GIZA_ITER_QTY_DESC);   
     mOptions.addOption(CommonParams.EMBED_DIR_PARAM,           null, true,  CommonParams.EMBED_DIR_DESC);         
   }
   
@@ -634,16 +589,6 @@ public abstract class BaseQueryApp {
     logger.info(String.format("Number of threads: %d", mThreadQty));
 
     mGizaRootDir = mCmd.getOptionValue(CommonParams.GIZA_ROOT_DIR_PARAM);
-    {
-      String tmpn = mCmd.getOptionValue(CommonParams.GIZA_ITER_QTY_PARAM);
-      if (null != tmpn) {
-        try {
-          mGizaIterQty = Integer.parseInt(tmpn);
-        } catch (NumberFormatException e) {
-          showUsage("Number of GIZA iterations isn't integer: '" + tmpn + "'");
-        }
-      } 
-    }
     mEmbedDir = mCmd.getOptionValue(CommonParams.EMBED_DIR_PARAM);
     
     mUseThreadPool = mCmd.hasOption(CommonParams.USE_THREAD_POOL_PARAM);
@@ -769,7 +714,7 @@ public abstract class BaseQueryApp {
            
           mParsedQueries.add(queryFields);
           ++queryQty;
-          if (queryQty % 100 == 0) logger.info("Read " + queryQty + " documents from " + mQueryFile);
+          if (queryQty % 1000 == 0) logger.info("Read " + queryQty + " documents from " + mQueryFile);
         }
       }
       
@@ -862,7 +807,6 @@ public abstract class BaseQueryApp {
   int          mThreadQty = 1;
   String       mSaveStatFile;     
   String       mGizaRootDir;
-  int          mGizaIterQty = -1;
   String       mEmbedDir;
   String       mFwdIndexPref;
   String       mExtrTypeFinal;

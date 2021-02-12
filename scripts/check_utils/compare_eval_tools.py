@@ -9,6 +9,7 @@ import os
 sys.path.append('.')
 
 from scripts.common_eval import *
+from scripts.utils import create_temp_file
 
 parser = argparse.ArgumentParser('Comparing external and internal eval tools')
 
@@ -31,10 +32,8 @@ run = readRunDict(args.run)
 query_ids = list(run.keys())
 
 
-f, tmpFileNameRun = tempfile.mkstemp()
-os.close(f)
-f, tmpFileNameQrels = tempfile.mkstemp()
-os.close(f)
+tmpFileNameRun = create_temp_file()
+tmpFileNameQrels = create_temp_file()
 
 print('query external internal')
 print('-----------------------')
@@ -52,8 +51,11 @@ for qid in query_ids:
     writeRunDict(tmpRun, tmpFileNameRun)
     res = []
     for i in range(2):
-        res.append(getEvalResults(i==0, args.eval_metric,
-                                  tmpRun, tmpFileNameRun, tmpFileNameQrels,
+        res.append(getEvalResults(i==0,
+                                  args.eval_metric,
+                                  rerankRun=tmpRun,
+                                  qrelFile=tmpFileNameQrels,
+                                  runFile=tmpFileNameRun,
                                   useQrelCache=False))
 
     val_ext, val_int = res[0], res[1]
